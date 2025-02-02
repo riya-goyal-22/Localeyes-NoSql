@@ -37,7 +37,20 @@ func AuthenticationMiddleware(next http.Handler) http.Handler {
 			}
 			return
 		}
-		next.ServeHTTP(w, r)
+		claims, err := utils.ExtractClaimsFunc(authHeader)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			response := utils.NewUnauthorizedError("Invalid token")
+			err := json.NewEncoder(w).Encode(response)
+			if err != nil {
+				utils.Logger.Error("ERROR: Error encoding response")
+			}
+			return
+		}
+		id := claims["id"]
+		ctx := context.WithValue(r.Context(), "Id", id)
+		ctx = context.WithValue(ctx, "Role", "user")
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -56,7 +69,7 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 		}
 		if !utils.ValidateAdminTokenFunc(authHeader) {
 			w.WriteHeader(http.StatusUnauthorized)
-			response := utils.NewUnauthorizedError("Invalid token")
+			response := utils.NewUnauthorizedError("Not an admin")
 			err := json.NewEncoder(w).Encode(response)
 			if err != nil {
 				utils.Logger.Error("ERROR: Error encoding response")

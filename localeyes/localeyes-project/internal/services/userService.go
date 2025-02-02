@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"github.com/google/uuid"
 	"localeyes/config"
 	"localeyes/internal/interfaces"
@@ -60,13 +61,13 @@ func (s *UserService) Login(ctx context.Context, username, password string) (*mo
 	hashedPassword := hashPassword(password)
 	dbUser, err := s.UserRepo.FetchUserByUsername(ctx, username)
 	if err != nil {
-		return nil, utils.InvalidAccountCredentials
+		return nil, errors.New(err.Error())
 	} else if dbUser == nil {
 		return nil, utils.InvalidAccountCredentials
 	} else if dbUser.IsActive == false {
 		return nil, utils.InactiveUser
 	} else if dbUser.Password != hashedPassword {
-		return nil, utils.InvalidAccountCredentials
+		return nil, errors.New("password mismatch")
 	}
 	user := &models.User{
 		Username:    dbUser.Username,
@@ -92,7 +93,7 @@ func (s *UserService) FetchProfile(ctx context.Context, uid string) (*models.Use
 func (s *UserService) DeActivate(ctx context.Context, uid string) error {
 	user, err := s.UserRepo.FetchUserById(ctx, uid)
 	user.IsActive = false
-	err = s.UserRepo.UpdateUserById(ctx, user)
+	err = s.UserRepo.ToggleUserActiveStatus(ctx, user)
 
 	return err
 }
@@ -181,14 +182,7 @@ func (s *UserService) UpdatePost(ctx context.Context, post *models.UpdatePost) e
 }
 
 func (s *UserService) GiveAllPosts(ctx context.Context, limit, offset *int, search, filter *string) ([]*models.Post, error) {
-	if filter != nil && *filter != "" {
-		posts, err := s.PostRepo.GetAllPostsWithFilter(ctx, limit, offset, search, filter)
-		if err != nil {
-			return nil, err
-		}
-		return posts, nil
-	}
-	posts, err := s.PostRepo.GetAllPosts(ctx, limit, offset, filter)
+	posts, err := s.PostRepo.GetAllPostsWithFilter(ctx, limit, offset, search, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +198,7 @@ func (s *UserService) GiveUserPosts(ctx context.Context, uId string) ([]*models.
 }
 
 func (s *UserService) DeleteUserPost(ctx context.Context, uId, pId string, post *models.DeleteOrLikePost) error {
-	err := s.PostRepo.DeletePost(ctx, string(post.Type), post.CreatedAt.Format("RFC3339"), uId, pId)
+	err := s.PostRepo.DeletePost(ctx, post.Type, post.CreatedAt, uId, pId)
 	if err != nil {
 		return err
 	}

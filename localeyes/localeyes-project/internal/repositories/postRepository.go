@@ -42,7 +42,7 @@ func (repo *PostRepository) Create(ctx context.Context, post *models.Post) error
 	postSKFilter := &models.PostSKFilter{
 		Title:     post.Title,
 		Content:   post.Content,
-		SK:        fmt.Sprintf("post:%s:%s:%s", post.Type, post.CreatedAt.Format("RFC3339"), post.PostId),
+		SK:        fmt.Sprintf("post:%s:%s:%s", post.Type, post.CreatedAt.Format(time.RFC3339), post.PostId),
 		CreatedAt: post.CreatedAt,
 		UId:       post.UId,
 		Likes:     post.Likes,
@@ -65,10 +65,13 @@ func (repo *PostRepository) Create(ctx context.Context, post *models.Post) error
 	postSKFilterAv, err := attributevalue.MarshalMap(postSKFilter)
 	notificationAv, err := attributevalue.MarshalMap(notification)
 	postPKIdAv["created_at"] = &types.AttributeValueMemberS{
-		Value: post.CreatedAt.Format("RFC3339"),
+		Value: post.CreatedAt.Format(time.RFC3339),
+	}
+	postSKFilterAv["created_at"] = &types.AttributeValueMemberS{
+		Value: post.CreatedAt.Format(time.RFC3339),
 	}
 	notificationAv["created_at"] = &types.AttributeValueMemberS{
-		Value: post.CreatedAt.Format("RFC3339"),
+		Value: post.CreatedAt.Format(time.RFC3339),
 	}
 	posts = append(posts, postPKIdAv, postSKFilterAv, notificationAv)
 	writeRequests := make([]types.WriteRequest, len(posts))
@@ -90,190 +93,98 @@ func (repo *PostRepository) Create(ctx context.Context, post *models.Post) error
 
 func (repo *PostRepository) GetAllPostsWithFilter(ctx context.Context, limit, offset *int, search, filter *string) ([]*models.Post, error) {
 	var allItems []map[string]types.AttributeValue
-	if search != nil && *search != "" {
-		for {
-			queryInput := &dynamodb.QueryInput{
-				TableName:              aws.String(repo.TableName),
-				FilterExpression:       aws.String("contains(title,:search)"),
-				KeyConditionExpression: aws.String("pk = :pk and begins_with(sk, :sk)"),
-				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":pk":     &types.AttributeValueMemberS{Value: "posts"},
-					":search": &types.AttributeValueMemberS{Value: *search},
-					":sk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s", *filter)},
-				},
-				ScanIndexForward: aws.Bool(false),
-			}
-			result, err := repo.Db.Query(ctx, queryInput)
-			if err != nil {
-				return nil, err
-			}
-			allItems = append(allItems, result.Items...)
-			if limit != nil && *limit > 0 && offset != nil {
-				if result.LastEvaluatedKey != nil && *limit+*offset >= len(allItems) {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			} else {
-				if result.LastEvaluatedKey != nil {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			}
+
+	// Construct the basic query input
+	queryInput := &dynamodb.QueryInput{
+		TableName:        aws.String(repo.TableName),
+		ScanIndexForward: aws.Bool(false),
+	}
+
+	// Set up the key condition expression based on whether a filter is provided
+	if filter != nil && *filter != "" {
+		// When filter is provided, query for specific post type
+		queryInput.KeyConditionExpression = aws.String("pk = :pk and begins_with(sk, :prefix)")
+		queryInput.ExpressionAttributeValues = map[string]types.AttributeValue{
+			":pk":     &types.AttributeValueMemberS{Value: "posts"},
+			":prefix": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:", strings.ToUpper(*filter))},
 		}
 	} else {
-		for {
-			queryInput := &dynamodb.QueryInput{
-				TableName:              aws.String(repo.TableName),
-				KeyConditionExpression: aws.String("pk = :pk and begins_with(sk, :sk)"),
-				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":pk": &types.AttributeValueMemberS{Value: "posts"},
-					":sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s", *filter)},
-				},
-				ScanIndexForward: aws.Bool(false),
-			}
-			result, err := repo.Db.Query(ctx, queryInput)
-			if err != nil {
-				return nil, err
-			}
-			allItems = append(allItems, result.Items...)
-			if limit != nil && *limit > 0 && offset != nil {
-				if result.LastEvaluatedKey != nil && *limit+*offset >= len(allItems) {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			} else {
-				if result.LastEvaluatedKey != nil {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			}
+		// When no filter is provided, query all posts
+		queryInput.KeyConditionExpression = aws.String("pk = :pk")
+		queryInput.ExpressionAttributeValues = map[string]types.AttributeValue{
+			":pk": &types.AttributeValueMemberS{Value: "posts"},
 		}
 	}
-	posts := make([]*models.Post, 0)
+
+	// Add search condition if provided
+	if search != nil && *search != "" {
+		queryInput.FilterExpression = aws.String("contains(title, :search)")
+		queryInput.ExpressionAttributeValues[":search"] = &types.AttributeValueMemberS{Value: *search}
+	}
+
+	// Execute query with pagination
+	for {
+		result, err := repo.Db.Query(ctx, queryInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute query: %w", err)
+		}
+
+		allItems = append(allItems, result.Items...)
+
+		// Check if we need to continue pagination
+		if result.LastEvaluatedKey == nil {
+			break
+		}
+
+		if limit != nil && offset != nil && *limit > 0 {
+			if len(allItems) >= *offset+*limit {
+				break
+			}
+		}
+
+		queryInput.ExclusiveStartKey = result.LastEvaluatedKey
+	}
+
+	// Transform DynamoDB items to Post models
+	posts := make([]*models.Post, 0, len(allItems))
 	for _, item := range allItems {
 		var postWithSK models.PostSKFilter
-		err := attributevalue.UnmarshalMap(item, &postWithSK)
-		if err != nil {
-			return nil, err
+		if err := attributevalue.UnmarshalMap(item, &postWithSK); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal post: %w", err)
 		}
+
 		sk := strings.Split(postWithSK.SK, ":")
+
 		post := &models.Post{
 			Title:     postWithSK.Title,
 			Content:   postWithSK.Content,
 			Likes:     postWithSK.Likes,
 			CreatedAt: postWithSK.CreatedAt,
 			UId:       postWithSK.UId,
-			PostId:    sk[3],
+			PostId:    sk[len(sk)-1],
 			Type:      config.Filter(sk[1]),
 		}
 		posts = append(posts, post)
 	}
-	if limit != nil && *limit > 0 && offset != nil && *limit+*offset <= len(posts) {
-		return posts[*offset : *limit+1], nil
+
+	// Apply pagination
+	if limit != nil && offset != nil && *limit > 0 && *offset < len(posts) {
+		end := *offset + *limit
+		if end > len(posts) {
+			end = len(posts)
+		}
+		return posts[*offset:end], nil
 	}
+
 	return posts, nil
 }
 
-func (repo *PostRepository) GetAllPosts(ctx context.Context, limit, offset *int, search *string) ([]*models.Post, error) {
-	var allItems []map[string]types.AttributeValue
-	if search != nil && *search != "" {
-		for {
-			queryInput := &dynamodb.QueryInput{
-				TableName:              aws.String(repo.TableName),
-				IndexName:              aws.String(repo.IndexName),
-				FilterExpression:       aws.String("contains(title,:search)"),
-				KeyConditionExpression: aws.String("pk = :pk"),
-				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":pk":     &types.AttributeValueMemberS{Value: "posts"},
-					":search": &types.AttributeValueMemberS{Value: *search},
-				},
-				ScanIndexForward: aws.Bool(false),
-			}
-			result, err := repo.Db.Query(ctx, queryInput)
-			if err != nil {
-				return nil, err
-			}
-			allItems = append(allItems, result.Items...)
-			if limit != nil && *limit > 0 && offset != nil {
-				if result.LastEvaluatedKey != nil && *limit+*offset >= len(allItems) {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			} else {
-				if result.LastEvaluatedKey != nil {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			}
-		}
-	} else {
-		for {
-			queryInput := &dynamodb.QueryInput{
-				TableName:              aws.String(repo.TableName),
-				IndexName:              aws.String(repo.IndexName),
-				KeyConditionExpression: aws.String("pk = :pk"),
-				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":pk": &types.AttributeValueMemberS{Value: "posts"},
-				},
-				ScanIndexForward: aws.Bool(false),
-			}
-			result, err := repo.Db.Query(ctx, queryInput)
-			if err != nil {
-				return nil, err
-			}
-			allItems = append(allItems, result.Items...)
-			if limit != nil && *limit > 0 && offset != nil {
-				if result.LastEvaluatedKey != nil && *limit+*offset >= len(allItems) {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			} else {
-				if result.LastEvaluatedKey != nil {
-					queryInput.ExclusiveStartKey = result.LastEvaluatedKey
-				} else {
-					break
-				}
-			}
-		}
-	}
-	posts := make([]*models.Post, 0)
-	for _, item := range allItems {
-		var postWithSK models.PostSKFilter
-		err := attributevalue.UnmarshalMap(item, &postWithSK)
-		if err != nil {
-			return nil, err
-		}
-		sk := strings.Split(postWithSK.SK, ":")
-		post := &models.Post{
-			Title:     postWithSK.Title,
-			Content:   postWithSK.Content,
-			Likes:     postWithSK.Likes,
-			CreatedAt: postWithSK.CreatedAt,
-			UId:       postWithSK.UId,
-			PostId:    sk[3],
-			Type:      config.Filter(sk[1]),
-		}
-		posts = append(posts, post)
-	}
-	if limit != nil && *limit > 0 && offset != nil && *limit+*offset <= len(posts) {
-		return posts[*offset : *limit+1], nil
-	}
-	return posts, nil
-}
-
-func (repo *PostRepository) DeletePost(ctx context.Context, filter, time, uId, pId string) error {
+func (repo *PostRepository) DeletePost(ctx context.Context, filter config.Filter, createdAt time.Time, uId, pId string) error {
 	input1 := &dynamodb.DeleteItemInput{
 		TableName: aws.String(repo.TableName),
 		Key: map[string]types.AttributeValue{
 			"pk": &types.AttributeValueMemberS{Value: "posts"},
-			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", filter, time, pId)},
+			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", filter, createdAt.Format(time.RFC3339), pId)},
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":userId": &types.AttributeValueMemberS{Value: uId},
@@ -297,6 +208,44 @@ func (repo *PostRepository) DeletePost(ctx context.Context, filter, time, uId, p
 		var pks []string
 		var queryOutput *dynamodb.QueryOutput
 		var err error
+		//queryInputLike := &dynamodb.QueryInput{
+		//	TableName:              aws.String(repo.TableName),
+		//	KeyConditionExpression: aws.String("pk = :pk"),
+		//	ExpressionAttributeValues: map[string]types.AttributeValue{
+		//		":pk": &types.AttributeValueMemberS{Value: "like:" + pId},
+		//	},
+		//}
+		//for {
+		//	queryOutput, err = repo.Db.Query(ctx, queryInputLike)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	if len(queryOutput.Items) == 0 {
+		//		break
+		//	}
+		//	for _, item := range queryOutput.Items {
+		//		writeRequests = append(writeRequests, types.WriteRequest{
+		//			DeleteRequest: &types.DeleteRequest{
+		//				Key: map[string]types.AttributeValue{
+		//					"pk": &types.AttributeValueMemberS{Value: item["pk"].(*types.AttributeValueMemberS).Value},
+		//				},
+		//			},
+		//		})
+		//	}
+		//	_, err := repo.Db.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+		//		RequestItems: map[string][]types.WriteRequest{
+		//			repo.TableName: writeRequests,
+		//		},
+		//	})
+		//	if err != nil {
+		//		return err
+		//	}
+		//	if queryOutput.LastEvaluatedKey == nil {
+		//		break
+		//	}
+		//	queryInputLike.ExclusiveStartKey = queryOutput.LastEvaluatedKey
+		//	writeRequests = nil
+		//}
 		queryInput := &dynamodb.QueryInput{
 			TableName:              aws.String(repo.TableName),
 			KeyConditionExpression: aws.String("pk = :pk AND begins_with(sk, :sk)"),
@@ -309,6 +258,9 @@ func (repo *PostRepository) DeletePost(ctx context.Context, filter, time, uId, p
 			queryOutput, err = repo.Db.Query(ctx, queryInput)
 			if err != nil {
 				return err
+			}
+			if len(queryOutput.Items) == 0 {
+				break
 			}
 			for _, item := range queryOutput.Items {
 				writeRequests = append(writeRequests, types.WriteRequest{
@@ -351,6 +303,9 @@ func (repo *PostRepository) DeletePost(ctx context.Context, filter, time, uId, p
 				queryOutput, err = repo.Db.Query(ctx, queryInput)
 				if err != nil {
 					return err
+				}
+				if len(queryOutput.Items) == 0 {
+					break
 				}
 				for _, item := range queryOutput.Items {
 					writeRequests = append(writeRequests, types.WriteRequest{
@@ -424,13 +379,13 @@ func (repo *PostRepository) UpdatePost(ctx context.Context, uId string, post *mo
 		TableName:           aws.String(repo.TableName),
 		ConditionExpression: aws.String("attribute_exists(pk) AND attribute_exists(sk) AND user_id = :userId"),
 		Key: map[string]types.AttributeValue{
-			"pk":     &types.AttributeValueMemberS{Value: "posts"},
-			"sk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", post.Type, post.CreatedAt.Format("RFC3339"), post.PostId)},
-			"userId": &types.AttributeValueMemberS{Value: uId},
+			"pk": &types.AttributeValueMemberS{Value: "posts"},
+			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", post.Type, post.CreatedAt.Format(time.RFC3339), post.PostId)},
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":title":   &types.AttributeValueMemberS{Value: post.Title},
 			":content": &types.AttributeValueMemberS{Value: post.Content},
+			":userId":  &types.AttributeValueMemberS{Value: uId},
 		},
 		UpdateExpression: aws.String("SET title =:title, content =:content"),
 	}
@@ -469,7 +424,7 @@ func (repo *PostRepository) UpdatePost(ctx context.Context, uId string, post *mo
 	return err
 }
 
-func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId string, time time.Time) (config.LikeStatus, error) {
+func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId string, createdAt time.Time) (config.LikeStatus, error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var err error
@@ -504,14 +459,14 @@ func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId str
 			TableName: aws.String(repo.TableName),
 			Key: map[string]types.AttributeValue{
 				"pk": &types.AttributeValueMemberS{Value: "posts"},
-				"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", filter, time.Format("RFC3339"), pId)},
+				"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", filter, createdAt.Format(time.RFC3339), pId)},
 			},
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":likes": &types.AttributeValueMemberN{Value: "1"},
 			},
 			UpdateExpression: aws.String("SET likes = likes - :likes"),
 		}
-		wg.Add(3)
+		wg.Add(2)
 		go update(input1)
 		go update(input2)
 		err = repo.deleteLikeEntry(ctx, uId, pId)
@@ -533,14 +488,14 @@ func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId str
 		TableName: aws.String(repo.TableName),
 		Key: map[string]types.AttributeValue{
 			"pk": &types.AttributeValueMemberS{Value: "posts"},
-			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", filter, time.Format("RFC3339"), pId)},
+			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("post:%s:%s:%s", filter, createdAt.Format(time.RFC3339), pId)},
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":likes": &types.AttributeValueMemberN{Value: "1"},
 		},
 		UpdateExpression: aws.String("SET likes = likes + :likes"),
 	}
-	wg.Add(3)
+	wg.Add(2)
 	go update(input1)
 	go update(input2)
 	err = repo.enterLikeEntry(ctx, uId, pId)

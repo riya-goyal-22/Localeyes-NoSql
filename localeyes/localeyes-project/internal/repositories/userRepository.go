@@ -33,38 +33,41 @@ func NewNoSQLUserRepository(db *dynamodb.Client) *UserRepository {
 func (repo *UserRepository) CreateUser(ctx context.Context, user *models.User) error {
 	users := make([]map[string]types.AttributeValue, 0, 3)
 	userSKEmail := &models.UserSKEmail{
-		PK:       "users",
-		UId:      user.UId,
-		Username: user.Username,
-		Password: user.Password,
-		Email:    "email:" + user.Email,
-		Tag:      user.Tag,
-		City:     user.City,
-		IsActive: user.IsActive,
+		PK:          "users",
+		UId:         user.UId,
+		Username:    user.Username,
+		Password:    user.Password,
+		Email:       "email:" + user.Email,
+		Tag:         user.Tag,
+		City:        user.City,
+		IsActive:    user.IsActive,
+		DwellingAge: user.DwellingAge,
 	}
 	userSKUsername := &models.UserSKUsername{
-		PK:       "users",
-		UId:      user.UId,
-		Username: "username:" + user.Username,
-		Password: user.Password,
-		Email:    user.Email,
-		Tag:      user.Tag,
-		City:     user.City,
-		IsActive: user.IsActive,
+		PK:          "users",
+		UId:         user.UId,
+		Username:    "username:" + user.Username,
+		Password:    user.Password,
+		Email:       user.Email,
+		Tag:         user.Tag,
+		City:        user.City,
+		IsActive:    user.IsActive,
+		DwellingAge: user.DwellingAge,
 	}
 	userPKId := &models.User{
-		UId:      "user:" + user.UId,
-		Username: user.Username,
-		Password: user.Password,
-		Email:    user.Email,
-		Tag:      user.Tag,
-		City:     user.City,
+		UId:         "user:" + user.UId,
+		Username:    user.Username,
+		Password:    user.Password,
+		Email:       user.Email,
+		Tag:         user.Tag,
+		City:        user.City,
+		DwellingAge: user.DwellingAge,
 	}
 	userSKEmailAv, err := attributevalue.MarshalMap(userSKEmail)
-	userSKEmailAv["dwelling_age"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)}
+	//userSKEmailAv["dwelling_age"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)}
 
 	userSKUsernameAv, err := attributevalue.MarshalMap(userSKUsername)
-	userSKUsernameAv["dwelling_age"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)}
+	//userSKUsernameAv["dwelling_age"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)}
 
 	av, err := attributevalue.MarshalMap(userPKId)
 	if user.IsActive {
@@ -72,7 +75,7 @@ func (repo *UserRepository) CreateUser(ctx context.Context, user *models.User) e
 	} else {
 		av["sk"] = &types.AttributeValueMemberS{Value: "false"}
 	}
-	av["dwelling_age"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)}
+	//av["dwelling_age"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)}
 
 	users = append(users, userSKEmailAv, userSKUsernameAv, av)
 	writeRequests := make([]types.WriteRequest, len(users))
@@ -149,12 +152,21 @@ func (repo *UserRepository) FetchUserByUsername(ctx context.Context, username st
 }
 
 func (repo *UserRepository) FetchUserById(ctx context.Context, uid string) (*models.User, error) {
-	input := &dynamodb.GetItemInput{
+	var input *dynamodb.GetItemInput
+	input = &dynamodb.GetItemInput{
 		TableName: aws.String(repo.TableName),
 		Key: map[string]types.AttributeValue{
 			"pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("user:%s", uid)},
 			"sk": &types.AttributeValueMemberS{Value: "true"},
 		},
+	}
+
+	if ctx.Value("Role").(string) == "admin" {
+		key := map[string]types.AttributeValue{
+			"pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("user:%s", uid)},
+			"sk": &types.AttributeValueMemberS{Value: "false"},
+		}
+		input.Key = key
 	}
 
 	result, err := repo.Db.GetItem(ctx, input)
@@ -190,12 +202,6 @@ func (repo *UserRepository) FetchUserById(ctx context.Context, uid string) (*mod
 }
 
 func (repo *UserRepository) UpdateUserById(ctx context.Context, user *models.User) error {
-	var activeStatus string
-	if user.IsActive {
-		activeStatus = "true"
-	} else {
-		activeStatus = "false"
-	}
 	input1 := &dynamodb.UpdateItemInput{
 		TableName: aws.String(repo.TableName),
 		Key: map[string]types.AttributeValue{
@@ -206,9 +212,8 @@ func (repo *UserRepository) UpdateUserById(ctx context.Context, user *models.Use
 			":city":         &types.AttributeValueMemberS{Value: user.City},
 			":password":     &types.AttributeValueMemberS{Value: user.Password},
 			":dwelling_age": &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)},
-			":is_active":    &types.AttributeValueMemberS{Value: activeStatus},
 		},
-		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age, is_active =:is_active")),
+		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age")),
 		ConditionExpression: aws.String("attribute_exists(pk) AND attribute_exists(sk)"),
 	}
 	input2 := &dynamodb.UpdateItemInput{
@@ -221,9 +226,8 @@ func (repo *UserRepository) UpdateUserById(ctx context.Context, user *models.Use
 			":city":         &types.AttributeValueMemberS{Value: user.City},
 			":password":     &types.AttributeValueMemberS{Value: user.Password},
 			":dwelling_age": &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)},
-			":is_active":    &types.AttributeValueMemberS{Value: activeStatus},
 		},
-		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age, is_active =:is_active")),
+		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age")),
 		ConditionExpression: aws.String("attribute_exists(pk) AND attribute_exists(sk)"),
 	}
 	input3 := &dynamodb.UpdateItemInput{
@@ -236,23 +240,22 @@ func (repo *UserRepository) UpdateUserById(ctx context.Context, user *models.Use
 			":city":         &types.AttributeValueMemberS{Value: user.City},
 			":password":     &types.AttributeValueMemberS{Value: user.Password},
 			":dwelling_age": &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)},
-			":is_active":    &types.AttributeValueMemberS{Value: activeStatus},
 		},
-		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age, is_active =:is_active")),
+		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age")),
 		ConditionExpression: aws.String("attribute_exists(pk) AND attribute_exists(sk)"),
 	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	var err error
+	var upErr error
 
 	update := func(input *dynamodb.UpdateItemInput) {
 		defer wg.Done()
 		_, updateErr := repo.Db.UpdateItem(ctx, input)
 		if updateErr != nil {
 			mu.Lock()
-			if err == nil {
-				err = updateErr
+			if upErr == nil {
+				upErr = updateErr
 			}
 			mu.Unlock()
 		}
@@ -262,7 +265,116 @@ func (repo *UserRepository) UpdateUserById(ctx context.Context, user *models.Use
 	go update(input2)
 	go update(input3)
 	wg.Wait()
-	return err
+	return upErr
+}
+
+func (repo *UserRepository) ToggleUserActiveStatus(ctx context.Context, user *models.User) error {
+	var activeStatus string
+	if user.IsActive {
+		activeStatus = "true"
+	} else {
+		activeStatus = "false"
+	}
+	var input1 *types.DeleteRequest
+
+	if ctx.Value("Role").(string) == "admin" {
+		input1 = &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("user:%s", user.UId)},
+				"sk": &types.AttributeValueMemberS{Value: "false"},
+			},
+		}
+	} else {
+		input1 = &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("user:%s", user.UId)},
+				"sk": &types.AttributeValueMemberS{Value: "true"},
+			},
+		}
+	}
+	userPKId := &models.User{
+		UId:         "user:" + user.UId,
+		Username:    user.Username,
+		Password:    user.Password,
+		Email:       user.Email,
+		Tag:         user.Tag,
+		City:        user.City,
+		DwellingAge: user.DwellingAge,
+	}
+	userAv, err := attributevalue.MarshalMap(userPKId)
+	if err != nil {
+		return err
+	}
+	userAv["sk"] = &types.AttributeValueMemberS{Value: activeStatus}
+	input2 := &types.PutRequest{
+		Item: userAv,
+	}
+	writeRequests := []types.WriteRequest{
+		{
+			DeleteRequest: input1,
+		},
+		{
+			PutRequest: input2,
+		},
+	}
+	_, err = repo.Db.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+		RequestItems: map[string][]types.WriteRequest{
+			repo.TableName: writeRequests,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var upErr error
+
+	update := func(input *dynamodb.UpdateItemInput) {
+		defer wg.Done()
+		_, updateErr := repo.Db.UpdateItem(ctx, input)
+		if updateErr != nil {
+			mu.Lock()
+			if upErr == nil {
+				upErr = updateErr
+			}
+			mu.Unlock()
+		}
+	}
+	input3 := &dynamodb.UpdateItemInput{
+		TableName: aws.String(repo.TableName),
+		Key: map[string]types.AttributeValue{
+			"pk": &types.AttributeValueMemberS{Value: "users"},
+			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("email:%s", user.Email)},
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":city":         &types.AttributeValueMemberS{Value: user.City},
+			":password":     &types.AttributeValueMemberS{Value: user.Password},
+			":dwelling_age": &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)},
+			":active":       &types.AttributeValueMemberBOOL{Value: user.IsActive},
+		},
+		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age, is_active = :active")),
+		ConditionExpression: aws.String("attribute_exists(pk) AND attribute_exists(sk)"),
+	}
+	input4 := &dynamodb.UpdateItemInput{
+		TableName: aws.String(repo.TableName),
+		Key: map[string]types.AttributeValue{
+			"pk": &types.AttributeValueMemberS{Value: "users"},
+			"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("username:%s", user.Username)},
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":city":         &types.AttributeValueMemberS{Value: user.City},
+			":password":     &types.AttributeValueMemberS{Value: user.Password},
+			":dwelling_age": &types.AttributeValueMemberN{Value: strconv.FormatFloat(user.DwellingAge, 'f', -1, 64)},
+			":active":       &types.AttributeValueMemberBOOL{Value: user.IsActive},
+		},
+		UpdateExpression:    aws.String(fmt.Sprintf("SET city =:city, password =:password , dwelling_age =:dwelling_age, is_active = :active")),
+		ConditionExpression: aws.String("attribute_exists(pk) AND attribute_exists(sk)"),
+	}
+	wg.Add(2)
+	go update(input3)
+	go update(input4)
+	wg.Wait()
+	return upErr
 }
 
 func (repo *UserRepository) FetchNotifications(ctx context.Context, uId string) ([]*models.Notification, error) {
@@ -308,7 +420,7 @@ func (repo *UserRepository) GetAllUsers(ctx context.Context) ([]*models.User, er
 	var users []*models.User
 	for _, user := range result.Items {
 		var userModel models.UserSKUsername
-		err := attributevalue.UnmarshalMap(user, userModel)
+		err := attributevalue.UnmarshalMap(user, &userModel)
 		if err != nil {
 			return nil, err
 		}
@@ -325,4 +437,46 @@ func (repo *UserRepository) GetAllUsers(ctx context.Context) ([]*models.User, er
 		users = append(users, userNew)
 	}
 	return users, nil
+}
+
+func (repo *UserRepository) DeleteUser(ctx context.Context, uId, username, email string) error {
+	input1 := types.WriteRequest{
+		DeleteRequest: &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "users"},
+				"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("username:%s", username)},
+			},
+		},
+	}
+	input2 := types.WriteRequest{
+		DeleteRequest: &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "users"},
+				"sk": &types.AttributeValueMemberS{Value: fmt.Sprintf("email:%s", email)},
+			},
+		},
+	}
+	input3 := types.WriteRequest{
+		DeleteRequest: &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user:" + uId},
+				"sk": &types.AttributeValueMemberS{Value: "true"},
+			},
+		},
+	}
+	input4 := types.WriteRequest{
+		DeleteRequest: &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user:" + uId},
+				"sk": &types.AttributeValueMemberS{Value: "false"},
+			},
+		},
+	}
+	writeRequests := []types.WriteRequest{input1, input2, input3, input4}
+	_, err := repo.Db.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+		RequestItems: map[string][]types.WriteRequest{
+			repo.TableName: writeRequests,
+		},
+	})
+	return err
 }

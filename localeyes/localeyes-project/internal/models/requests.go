@@ -51,13 +51,19 @@ type DeleteOrLikePost struct {
 }
 
 type RequestQuestion struct {
-	PostId string `json:"post_id" validate:"required"`
+	PostId string `json:"post_id"`
 	UserId string `json:"q_user_id"`
 	Text   string `json:"text" validate:"required"`
 }
 
 type RequestAnswer struct {
-	QId    string `json:"q_id" validate:"required"`
+	QId    string `json:"q_id"`
 	Answer string `json:"answer" validate:"required"`
 	UserId string `json:"r_user_id"`
+}
+
+type DeleteUser struct {
+	Username string `json:"username" validate:"required"`
+	Email    string `json:"email" validate:"required,email"`
+	UId      string `json:"user_id"`
 }

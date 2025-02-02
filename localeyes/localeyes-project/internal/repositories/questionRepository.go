@@ -76,6 +76,9 @@ func (repo *QuestionRepository) DeleteByQId(ctx context.Context, qId, pId, uId s
 			if err != nil {
 				return err
 			}
+			if len(queryOutput.Items) == 0 {
+				break
+			}
 			for _, item := range queryOutput.Items {
 				writeRequests = append(writeRequests, types.WriteRequest{
 					DeleteRequest: &types.DeleteRequest{

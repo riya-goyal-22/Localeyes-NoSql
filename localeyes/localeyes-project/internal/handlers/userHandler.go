@@ -164,11 +164,10 @@ func (handler *UserHandler) DeActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := claims["id"].(string)
-	//intId := int(id)
 	err = handler.service.DeActivate(r.Context(), id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		response := utils.NewInternalServerError("Error deactivating user")
+		response := utils.NewInternalServerError(err.Error())
 		err = json.NewEncoder(w).Encode(response)
 		if err != nil {
 			utils.Logger.Error("ERROR: Error encoding response")
@@ -370,14 +369,10 @@ func (handler *UserHandler) DisplayPosts(w http.ResponseWriter, r *http.Request)
 	} else {
 		offsetPointer = &offset
 	}
-	if filter == "" {
+	if !utils.IsValidFilter(filter) {
 		filterPointer = nil
 	} else {
-		if !utils.IsValidFilter(filter) {
-			filterPointer = nil
-		} else {
-			filterPointer = &filter
-		}
+		filterPointer = &filter
 	}
 	if search == "" {
 		searchPointer = nil
@@ -493,15 +488,6 @@ func (handler *UserHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	//if !utils.ValidateFilter(requestPost.Type) {
-	//	w.WriteHeader(http.StatusBadRequest)
-	//	response := utils.NewBadRequestError("Invalid Filter for post")
-	//	err = json.NewEncoder(w).Encode(response)
-	//	if err != nil {
-	//		utils.Logger.Error("ERROR: Error encoding response")
-	//	}
-	//	return
-	//}
 	claims, err := utils.ExtractClaimsFunc(bearerToken)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -575,17 +561,8 @@ func (handler *UserHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
 	post.UId = id
 	err = handler.service.UpdatePost(r.Context(), &post)
 	if err != nil {
-		if errors.Is(err, utils.NotYourPost) {
-			w.WriteHeader(http.StatusNotFound)
-			response := utils.NewNotFoundError(err.Error())
-			err := json.NewEncoder(w).Encode(response)
-			if err != nil {
-				utils.Logger.Error("Error encoding response:" + err.Error())
-			}
-			return
-		}
 		w.WriteHeader(http.StatusInternalServerError)
-		response := utils.NewInternalServerError("Error updating post")
+		response := utils.NewInternalServerError(err.Error())
 		err := json.NewEncoder(w).Encode(response)
 		if err != nil {
 			utils.Logger.Error("Error encoding response:" + err.Error())
@@ -609,6 +586,25 @@ func (handler *UserHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
 	postId := mux.Vars(r)["post_id"]
 	var post models.DeleteOrLikePost
 	err := json.NewDecoder(r.Body).Decode(&post)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewUnauthorizedError("Invalid Json")
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("Error encoding response:" + err.Error())
+		}
+		return
+	}
+	err = handler.validator.Struct(post)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewBadRequestError(err.Error())
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("Error encoding response:" + err.Error())
+		}
+		return
+	}
 	claims, err := utils.ExtractClaimsFunc(bearerToken)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -623,7 +619,7 @@ func (handler *UserHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
 	err = handler.service.DeleteUserPost(r.Context(), id, postId, &post)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		response := utils.NewInternalServerError("Error deleting post")
+		response := utils.NewInternalServerError(err.Error())
 		err := json.NewEncoder(w).Encode(response)
 		if err != nil {
 			utils.Logger.Error("Error encoding response:" + err.Error())
@@ -647,6 +643,25 @@ func (handler *UserHandler) LikePost(w http.ResponseWriter, r *http.Request) {
 	bearerToken := r.Header.Get("Authorization")
 	var post models.DeleteOrLikePost
 	err := json.NewDecoder(r.Body).Decode(&post)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewUnauthorizedError("Invalid Json")
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("Error encoding response:" + err.Error())
+		}
+		return
+	}
+	err = handler.validator.Struct(post)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewBadRequestError(err.Error())
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("Error encoding response:" + err.Error())
+		}
+		return
+	}
 	claims, err := utils.ExtractClaimsFunc(bearerToken)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -661,7 +676,7 @@ func (handler *UserHandler) LikePost(w http.ResponseWriter, r *http.Request) {
 	status, err := handler.service.Like(r.Context(), userId, postId, &post)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		response := utils.NewInternalServerError("Error liking post")
+		response := utils.NewInternalServerError(err.Error())
 		err := json.NewEncoder(w).Encode(response)
 		if err != nil {
 			utils.Logger.Error("Error encoding response:" + err.Error())
@@ -698,7 +713,7 @@ func (handler *UserHandler) GetLikeStatus(w http.ResponseWriter, r *http.Request
 	status, err := handler.service.GetLikeStatus(r.Context(), userId, postId)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		response := utils.NewInternalServerError("Error disliking post")
+		response := utils.NewInternalServerError(err.Error())
 		err := json.NewEncoder(w).Encode(response)
 		if err != nil {
 			utils.Logger.Error("Error encoding response:" + err.Error())
@@ -706,9 +721,9 @@ func (handler *UserHandler) GetLikeStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	utils.Logger.Info("Successfully disliked post")
+	utils.Logger.Info("Successfully viewed the like status")
 	response := &models.Response{
-		Message: "Post disliked successfully",
+		Message: "Successfully viewed the like status",
 		Code:    http.StatusOK,
 		Data:    status,
 	}
@@ -720,6 +735,44 @@ func (handler *UserHandler) GetLikeStatus(w http.ResponseWriter, r *http.Request
 
 // question related handlers
 
+func (handler *UserHandler) CreateQuestion(w http.ResponseWriter, r *http.Request) {
+	var question models.RequestQuestion
+	err := json.NewDecoder(r.Body).Decode(&question)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewBadRequestError("Invalid Request Body")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	postId := mux.Vars(r)["post_id"]
+	userId := r.Context().Value("Id").(string)
+	question.UserId = userId
+	question.PostId = postId
+	err = handler.service.AddQuestion(r.Context(), &question)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := utils.NewInternalServerError("error while asking question")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	utils.Logger.Info("Question created")
+	response := &models.Response{
+		Code:    http.StatusOK,
+		Message: "Question Created",
+	}
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		utils.Logger.Error("ERROR: error encoding response")
+	}
+}
+
 func (handler *UserHandler) GetAllQuestions(w http.ResponseWriter, r *http.Request) {
 	postId := mux.Vars(r)["post_id"]
 	questions, err := handler.service.GetQuestionByPId(r.Context(), postId)
@@ -730,6 +783,7 @@ func (handler *UserHandler) GetAllQuestions(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			utils.Logger.Error("Error encoding response:" + err.Error())
 		}
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	utils.Logger.Info("Successfully retrieved all questions")
@@ -741,5 +795,131 @@ func (handler *UserHandler) GetAllQuestions(w http.ResponseWriter, r *http.Reque
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
 		utils.Logger.Error("Error encoding response:" + err.Error())
+	}
+}
+
+func (handler *UserHandler) AddAnswer(w http.ResponseWriter, r *http.Request) {
+	quesId := mux.Vars(r)["ques_id"]
+	var request models.RequestAnswer
+	err := json.NewDecoder(r.Body).Decode(&request)
+	userId := r.Context().Value("Id").(string)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewBadRequestError("Invalid Request Body")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	err = handler.validator.Struct(request)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := utils.NewBadRequestError("Invalid Input")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	request.UserId = userId
+	request.QId = quesId
+	err = handler.service.AddAnswer(r.Context(), &request)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := utils.NewInternalServerError("error while adding answer")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	utils.Logger.Info("Answer added")
+	response := &models.Response{
+		Code:    http.StatusOK,
+		Message: "Answer Added",
+	}
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		utils.Logger.Error("ERROR: error encoding response")
+	}
+}
+
+func (handler *UserHandler) DeleteQuestion(w http.ResponseWriter, r *http.Request) {
+	quesId := mux.Vars(r)["ques_id"]
+	postId := mux.Vars(r)["post_id"]
+	userId := r.Context().Value("Id").(string)
+
+	err := handler.service.DeleteQuestion(r.Context(), postId, quesId, userId)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := utils.NewInternalServerError("error while deleting question")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	utils.Logger.Info("Question deleted")
+	response := &models.Response{
+		Code:    http.StatusOK,
+		Message: "Question Deleted",
+	}
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		utils.Logger.Error("ERROR: error encoding response")
+	}
+}
+
+func (handler *UserHandler) DeleteAnswer(w http.ResponseWriter, r *http.Request) {
+	quesId := mux.Vars(r)["ques_id"]
+	answerId := mux.Vars(r)["answer_id"]
+	userId := r.Context().Value("Id").(string)
+	err := handler.service.DeleteAnswer(r.Context(), quesId, answerId, userId)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := utils.NewInternalServerError("error while deleting answer")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	utils.Logger.Info("Answer deleted")
+	response := &models.Response{
+		Code:    http.StatusOK,
+		Message: "Answer Deleted",
+	}
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		utils.Logger.Error("ERROR: error encoding response" + err.Error())
+	}
+}
+
+func (handler *UserHandler) GetAllAnswers(w http.ResponseWriter, r *http.Request) {
+	quesId := mux.Vars(r)["ques_id"]
+	answers, err := handler.service.GetAllAnswers(r.Context(), quesId)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := utils.NewInternalServerError("error while getting answers")
+		err = json.NewEncoder(w).Encode(response)
+		if err != nil {
+			utils.Logger.Error("ERROR: error encoding response")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	utils.Logger.Info("Successfully retrieved all answers")
+	response := &models.Response{
+		Message: "Successfully retrieved all answers",
+		Code:    http.StatusOK,
+		Data:    answers,
+	}
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		utils.Logger.Error("ERROR: error encoding response")
 	}
 }

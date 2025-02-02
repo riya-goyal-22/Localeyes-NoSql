@@ -20,9 +20,11 @@ func ValidatePassword(fl validator.FieldLevel) bool {
 }
 
 func ValidateTime(fl validator.FieldLevel) bool {
-	const layout = "RFC3339"
-	_, err := time.Parse(layout, fl.Field().String())
-	return err == nil
+	timeValue, ok := fl.Field().Interface().(time.Time)
+	if !ok {
+		return false
+	}
+	return !timeValue.IsZero()
 }
 
 func ValidateFilter(fl validator.FieldLevel) bool {
