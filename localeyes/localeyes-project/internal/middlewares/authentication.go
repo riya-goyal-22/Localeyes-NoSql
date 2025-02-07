@@ -10,7 +10,7 @@ import (
 
 func AuthenticationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		excludedPaths := []string{"/login", "/signup"}
+		excludedPaths := []string{"/login", "/signup", "/sns", "/otp", "/password/reset"}
 		for _, path := range excludedPaths {
 			if strings.Contains(r.URL.Path, path) {
 				next.ServeHTTP(w, r)

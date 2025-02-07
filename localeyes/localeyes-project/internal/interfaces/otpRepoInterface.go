@@ -1,7 +1,9 @@
 package interfaces
 
+import "context"
+
 type OTPRepoInterface interface {
 	GenerateOTP() (string, error)
-	SaveOTP(email string, otp string)
-	ValidateOTP(email string, otp string) bool
+	SaveOTP(ctx context.Context, email string, otp string) error
+	ValidateOTP(ctx context.Context, email string, otp string) bool
 }

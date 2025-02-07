@@ -37,6 +37,7 @@ func createRouter() *mux.Router {
 		repositories.NewPostRepository(client),
 		repositories.NewQuestionRepository(client),
 		repositories.NewAnswerRepository(client),
+		repositories.NewOtpRepository(client),
 	)
 	adminService := services.NewAdminService(
 		repositories.NewNoSQLUserRepository(client),
@@ -50,6 +51,9 @@ func createRouter() *mux.Router {
 	// Define routes
 	router.HandleFunc("/signup", userHandler.SignUp).Methods("POST")
 	router.HandleFunc("/login", userHandler.Login).Methods("POST")
+	router.HandleFunc("/otp", userHandler.SendOtp).Methods("POST")
+	router.HandleFunc("/password/reset", userHandler.ResetPassword).Methods("POST")
+	router.HandleFunc("/sns", userHandler.ForgotPassword).Methods("POST")
 
 	router.HandleFunc("/user/profile", userHandler.ViewProfile).Methods("GET")
 	router.HandleFunc("/user/deactivate", userHandler.DeActivate).Methods("POST") //need to be checked

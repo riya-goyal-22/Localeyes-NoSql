@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"localeyes/internal/models"
 	"localeyes/utils"
@@ -112,7 +111,7 @@ func (repo *UserRepository) FetchUserByEmail(ctx context.Context, email string) 
 	}
 
 	if result.Item == nil {
-		return &models.UserSKEmail{}, errors.New("user not found")
+		return &models.UserSKEmail{}, utils.NoUser
 	}
 
 	var dbUser models.UserSKEmail
@@ -139,7 +138,7 @@ func (repo *UserRepository) FetchUserByUsername(ctx context.Context, username st
 	}
 
 	if result.Item == nil {
-		return &models.UserSKUsername{}, errors.New("user not found")
+		return &models.UserSKUsername{}, utils.NoUser
 	}
 
 	var dbUser models.UserSKUsername
@@ -151,7 +150,7 @@ func (repo *UserRepository) FetchUserByUsername(ctx context.Context, username st
 	return &dbUser, nil
 }
 
-func (repo *UserRepository) FetchUserById(ctx context.Context, uid string) (*models.User, error) {
+func (repo *UserRepository) FetchUserById(ctx context.Context, uid string, isUserActive bool) (*models.User, error) {
 	var input *dynamodb.GetItemInput
 	input = &dynamodb.GetItemInput{
 		TableName: aws.String(repo.TableName),
@@ -161,7 +160,7 @@ func (repo *UserRepository) FetchUserById(ctx context.Context, uid string) (*mod
 		},
 	}
 
-	if ctx.Value("Role").(string) == "admin" {
+	if !isUserActive {
 		key := map[string]types.AttributeValue{
 			"pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("user:%s", uid)},
 			"sk": &types.AttributeValueMemberS{Value: "false"},
@@ -405,29 +404,96 @@ func (repo *UserRepository) FetchNotifications(ctx context.Context, uId string) 
 	return notifications, nil
 }
 
-func (repo *UserRepository) GetAllUsers(ctx context.Context) ([]*models.User, error) {
-	result, err := repo.Db.Query(ctx, &dynamodb.QueryInput{
+//func (repo *UserRepository) GetAllUsers(ctx context.Context) ([]*models.User, error) {
+//	result, err := repo.Db.Query(ctx, &dynamodb.QueryInput{
+//		TableName:              aws.String(repo.TableName),
+//		KeyConditionExpression: aws.String("pk = :pk AND begins_with(sk, :sk)"),
+//		ExpressionAttributeValues: map[string]types.AttributeValue{
+//			":pk": &types.AttributeValueMemberS{Value: "users"},
+//			":sk": &types.AttributeValueMemberS{Value: "username:"},
+//		},
+//	})
+//	if err != nil {
+//		return nil, err
+//	}
+//	var users []*models.User
+//	for _, user := range result.Items {
+//		var userModel models.UserSKUsername
+//		err := attributevalue.UnmarshalMap(user, &userModel)
+//		if err != nil {
+//			return nil, err
+//		}
+//		userNew := &models.User{
+//			Username:    strings.Split(userModel.Username, ":")[1],
+//			UId:         userModel.UId,
+//			Email:       userModel.Email,
+//			DwellingAge: userModel.DwellingAge,
+//			Password:    userModel.Password,
+//			City:        userModel.City,
+//			IsActive:    userModel.IsActive,
+//			Tag:         userModel.Tag,
+//		}
+//		users = append(users, userNew)
+//	}
+//	return users, nil
+//}
+
+func (repo *UserRepository) GetAllUsers(ctx context.Context, params models.GetUsersParams) ([]*models.User, error) {
+	if params.Limit == 0 {
+		params.Limit = 10
+	}
+
+	queryInput := &dynamodb.QueryInput{
 		TableName:              aws.String(repo.TableName),
 		KeyConditionExpression: aws.String("pk = :pk AND begins_with(sk, :sk)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":pk": &types.AttributeValueMemberS{Value: "users"},
-			":sk": &types.AttributeValueMemberS{Value: "username:"},
+			":sk": &types.AttributeValueMemberS{Value: "email:"},
 		},
-	})
+		Limit: aws.Int32(params.Limit),
+	}
+
+	// Add search filter if search parameter is provided
+	if params.Search != "" {
+		queryInput.FilterExpression = aws.String("contains(username, :search)")
+		queryInput.ExpressionAttributeValues[":search"] = &types.AttributeValueMemberS{Value: params.Search}
+	}
+
+	// Handle offset using ExclusiveStartKey
+	if params.Offset > 0 {
+		// First, we need to get the key at offset position
+		offsetInput := *queryInput
+		offsetInput.Limit = aws.Int32(params.Offset)
+
+		offsetResult, err := repo.Db.Query(ctx, &offsetInput)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(offsetResult.Items) > 0 {
+			queryInput.ExclusiveStartKey = offsetResult.LastEvaluatedKey
+		} else {
+			return []*models.User{}, nil // Return empty if offset is beyond available data
+		}
+	}
+
+	result, err := repo.Db.Query(ctx, queryInput)
 	if err != nil {
 		return nil, err
 	}
+
 	var users []*models.User
 	for _, user := range result.Items {
-		var userModel models.UserSKUsername
+		var userModel models.UserSKEmail
 		err := attributevalue.UnmarshalMap(user, &userModel)
 		if err != nil {
 			return nil, err
 		}
+
 		userNew := &models.User{
-			Username:    strings.Split(userModel.Username, ":")[1],
+			Username:    userModel.Username,
 			UId:         userModel.UId,
-			Email:       userModel.Email,
+			Email:       strings.Split(userModel.Email, ":")[1],
 			DwellingAge: userModel.DwellingAge,
 			Password:    userModel.Password,
 			City:        userModel.City,

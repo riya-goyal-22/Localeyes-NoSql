@@ -45,7 +45,13 @@ type UpdatePost struct {
 	CreatedAt time.Time     `json:"created_at" validate:"required,isValidTime"`
 }
 
-type DeleteOrLikePost struct {
+type DeletePost struct {
+	CreatedAt time.Time     `json:"created_at" validate:"required,isValidTime"`
+	Type      config.Filter `json:"type" validate:"required,isValidFilter"`
+}
+
+type LikePost struct {
+	UId       string        `json:"user_id" validate:"required"`
 	CreatedAt time.Time     `json:"created_at" validate:"required,isValidTime"`
 	Type      config.Filter `json:"type" validate:"required,isValidFilter"`
 }

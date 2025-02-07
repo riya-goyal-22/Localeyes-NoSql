@@ -13,6 +13,6 @@ type PostRepository interface {
 	DeletePost(ctx context.Context, filter config.Filter, createdAt time.Time, uId string, pId string) error
 	GetPostsByUId(ctx context.Context, uId string) ([]*models.Post, error)
 	UpdatePost(ctx context.Context, uId string, post *models.Post) error
-	ToggleLike(ctx context.Context, uId string, filter string, pId string, createdAt time.Time) (config.LikeStatus, error)
+	ToggleLike(ctx context.Context, postUId, uId, filter, pId string, createdAt time.Time) (config.LikeStatus, error)
 	HasUserLikedAPost(ctx context.Context, uId string, pId string) (bool, error)
 }

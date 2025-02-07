@@ -47,11 +47,17 @@ type UserSKUsername struct {
 }
 
 type UserEmail struct {
-	Email string `json:"email"`
+	Email string `json:"email" validate:"required"`
 }
 
 type ResetPasswordUser struct {
-	Email       string `json:"email"`
-	OTP         string `json:"otp"`
-	NewPassword string `json:"new_password"`
+	Email       string `json:"email" validate:"required"`
+	OTP         string `json:"otp" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required"`
+}
+
+type GetUsersParams struct {
+	Limit  int32
+	Offset int32
+	Search string
 }

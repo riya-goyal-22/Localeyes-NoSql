@@ -5,12 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
+	"gopkg.in/gomail.v2"
 	"localeyes/config"
 	"localeyes/internal/interfaces"
 	"localeyes/internal/models"
 	"localeyes/utils"
 	"math"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -19,14 +23,22 @@ type UserService struct {
 	PostRepo interfaces.PostRepository
 	QuesRepo interfaces.QuestionRepoInterface
 	AnsRepo  interfaces.AnswerRepoInterface
+	OTPRepo  interfaces.OTPRepoInterface
 }
 
-func NewUserService(userRepo interfaces.UserRepository, postRepo interfaces.PostRepository, quesRepo interfaces.QuestionRepoInterface, ansRepo interfaces.AnswerRepoInterface) *UserService {
+func NewUserService(
+	userRepo interfaces.UserRepository,
+	postRepo interfaces.PostRepository,
+	quesRepo interfaces.QuestionRepoInterface,
+	ansRepo interfaces.AnswerRepoInterface,
+	otpRepo interfaces.OTPRepoInterface,
+) *UserService {
 	return &UserService{
 		UserRepo: userRepo,
 		PostRepo: postRepo,
 		QuesRepo: quesRepo,
 		AnsRepo:  ansRepo,
+		OTPRepo:  otpRepo,
 	}
 }
 
@@ -62,12 +74,12 @@ func (s *UserService) Login(ctx context.Context, username, password string) (*mo
 	dbUser, err := s.UserRepo.FetchUserByUsername(ctx, username)
 	if err != nil {
 		return nil, errors.New(err.Error())
-	} else if dbUser == nil {
+	} else if errors.Is(err, utils.NoUser) {
 		return nil, utils.InvalidAccountCredentials
 	} else if dbUser.IsActive == false {
 		return nil, utils.InactiveUser
 	} else if dbUser.Password != hashedPassword {
-		return nil, errors.New("password mismatch")
+		return nil, utils.InvalidAccountCredentials
 	}
 	user := &models.User{
 		Username:    dbUser.Username,
@@ -83,7 +95,7 @@ func (s *UserService) Login(ctx context.Context, username, password string) (*mo
 }
 
 func (s *UserService) FetchProfile(ctx context.Context, uid string) (*models.User, error) {
-	user, err := s.UserRepo.FetchUserById(ctx, uid)
+	user, err := s.UserRepo.FetchUserById(ctx, uid, true)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +103,7 @@ func (s *UserService) FetchProfile(ctx context.Context, uid string) (*models.Use
 }
 
 func (s *UserService) DeActivate(ctx context.Context, uid string) error {
-	user, err := s.UserRepo.FetchUserById(ctx, uid)
+	user, err := s.UserRepo.FetchUserById(ctx, uid, true)
 	user.IsActive = false
 	err = s.UserRepo.ToggleUserActiveStatus(ctx, user)
 
@@ -127,8 +139,8 @@ func (s *UserService) validateEmail(ctx context.Context, email string) bool {
 	if email == "localeyes22@gmail.com" {
 		return false
 	}
-	user, err := s.UserRepo.FetchUserByEmail(ctx, email)
-	if user == nil || err != nil {
+	_, err := s.UserRepo.FetchUserByEmail(ctx, email)
+	if err != nil {
 		return true
 	}
 	return false
@@ -138,7 +150,7 @@ func (s *UserService) UpdateUser(ctx context.Context, uId string, requestUser *m
 	var dwellingAge = (requestUser.LivingSince.Days / 365.0) + (requestUser.LivingSince.Years) + (requestUser.LivingSince.Months / 12.0)
 	var hashedPassword = hashPassword(requestUser.Password)
 	var tag = utils.SetTag(dwellingAge)
-	user, err := s.UserRepo.FetchUserById(ctx, uId)
+	user, err := s.UserRepo.FetchUserById(ctx, uId, true)
 	if err != nil {
 		return err
 	}
@@ -197,7 +209,7 @@ func (s *UserService) GiveUserPosts(ctx context.Context, uId string) ([]*models.
 	return posts, nil
 }
 
-func (s *UserService) DeleteUserPost(ctx context.Context, uId, pId string, post *models.DeleteOrLikePost) error {
+func (s *UserService) DeleteUserPost(ctx context.Context, uId, pId string, post *models.DeletePost) error {
 	err := s.PostRepo.DeletePost(ctx, post.Type, post.CreatedAt, uId, pId)
 	if err != nil {
 		return err
@@ -205,8 +217,8 @@ func (s *UserService) DeleteUserPost(ctx context.Context, uId, pId string, post 
 	return nil
 }
 
-func (s *UserService) Like(ctx context.Context, uId, pId string, post *models.DeleteOrLikePost) (config.LikeStatus, error) {
-	status, err := s.PostRepo.ToggleLike(ctx, uId, string(post.Type), pId, post.CreatedAt)
+func (s *UserService) Like(ctx context.Context, uId, pId string, post *models.LikePost) (config.LikeStatus, error) {
+	status, err := s.PostRepo.ToggleLike(ctx, post.UId, uId, string(post.Type), pId, post.CreatedAt)
 	if err != nil {
 		return "0", err
 	}
@@ -222,6 +234,68 @@ func (s *UserService) GetLikeStatus(ctx context.Context, uId, pId string) (confi
 		return config.Liked, nil
 	}
 	return config.NotLiked, nil
+}
+
+//forget password
+
+func (s *UserService) SendOtp(ctx context.Context, email string) error {
+	_, err := s.UserRepo.FetchUserByEmail(ctx, email)
+	if err != nil {
+		return err
+	}
+	otp, err := s.OTPRepo.GenerateOTP()
+	if err != nil {
+		return err
+	}
+
+	message := gomail.NewMessage()
+	message.SetHeader("From", os.Getenv("SMTPSenderEmail"))
+	message.SetHeader("To", email)
+	message.SetHeader("Subject", "Go SMTP Test")
+	message.SetBody("text/plain", "Hello,\r\nThis is your otp to reset password: "+otp)
+
+	port, _ := strconv.Atoi(os.Getenv("SMTPPort"))
+	// Create a dialer with SMTP server information
+	dialer := gomail.NewDialer(
+		os.Getenv("SMTPServer"),
+		port,
+		os.Getenv("SMTPSenderEmail"),
+		os.Getenv("SMTPSenderPassword"),
+	)
+	if os.Getenv("SMTPServer") == "" || os.Getenv("SMTPPort") == "" || os.Getenv("SMTPSenderEmail") == "" || os.Getenv("SMTPSenderPassword") == "" {
+		return fmt.Errorf("missing required environment variables for SMTP configuration")
+
+	}
+
+	// Send the email via the dialer
+	if err := dialer.DialAndSend(message); err != nil {
+		return err
+	}
+	err = s.OTPRepo.SaveOTP(ctx, email, otp)
+	return err
+}
+
+func (s *UserService) PasswordReset(ctx context.Context, resetUser models.ResetPasswordUser) error {
+	if s.OTPRepo.ValidateOTP(ctx, resetUser.Email, resetUser.OTP) {
+		user, err := s.UserRepo.FetchUserByEmail(ctx, resetUser.Email)
+		if err != nil {
+			return err
+		}
+		hashedPassword := hashPassword(resetUser.NewPassword)
+		var updatedUser = models.User{
+			Username:    user.Username,
+			Password:    hashedPassword,
+			IsActive:    user.IsActive,
+			UId:         user.UId,
+			City:        user.City,
+			DwellingAge: user.DwellingAge,
+			Tag:         user.Tag,
+			Email:       user.Email,
+		}
+		err = s.UserRepo.UpdateUserById(ctx, &updatedUser)
+		return err
+	}
+	return utils.WrongOTP
 }
 
 //question related services

@@ -167,6 +167,10 @@ func (repo *PostRepository) GetAllPostsWithFilter(ctx context.Context, limit, of
 		posts = append(posts, post)
 	}
 
+	if offset != nil && *offset > len(posts) {
+		return []*models.Post{}, nil
+	}
+
 	// Apply pagination
 	if limit != nil && offset != nil && *limit > 0 && *offset < len(posts) {
 		end := *offset + *limit
@@ -424,7 +428,7 @@ func (repo *PostRepository) UpdatePost(ctx context.Context, uId string, post *mo
 	return err
 }
 
-func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId string, createdAt time.Time) (config.LikeStatus, error) {
+func (repo *PostRepository) ToggleLike(ctx context.Context, postUId, uId, filter, pId string, createdAt time.Time) (config.LikeStatus, error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var err error
@@ -447,7 +451,7 @@ func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId str
 		input1 := &dynamodb.UpdateItemInput{
 			TableName: aws.String(repo.TableName),
 			Key: map[string]types.AttributeValue{
-				"pk": &types.AttributeValueMemberS{Value: "user:" + uId},
+				"pk": &types.AttributeValueMemberS{Value: "user:" + postUId},
 				"sk": &types.AttributeValueMemberS{Value: "post:" + pId},
 			},
 			ExpressionAttributeValues: map[string]types.AttributeValue{
@@ -476,7 +480,7 @@ func (repo *PostRepository) ToggleLike(ctx context.Context, uId, filter, pId str
 	input1 := &dynamodb.UpdateItemInput{
 		TableName: aws.String(repo.TableName),
 		Key: map[string]types.AttributeValue{
-			"pk": &types.AttributeValueMemberS{Value: "user:" + uId},
+			"pk": &types.AttributeValueMemberS{Value: "user:" + postUId},
 			"sk": &types.AttributeValueMemberS{Value: "post:" + pId},
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{

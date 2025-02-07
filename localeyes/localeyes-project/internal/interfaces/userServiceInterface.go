@@ -17,9 +17,11 @@ type UserServiceInterface interface {
 	UpdatePost(ctx context.Context, post *models.UpdatePost) error
 	GiveAllPosts(ctx context.Context, limit *int, offset *int, search *string, filter *string) ([]*models.Post, error)
 	GiveUserPosts(ctx context.Context, uId string) ([]*models.Post, error)
-	DeleteUserPost(ctx context.Context, uId string, pId string, post *models.DeleteOrLikePost) error
-	Like(ctx context.Context, uId string, pId string, post *models.DeleteOrLikePost) (config.LikeStatus, error)
+	DeleteUserPost(ctx context.Context, uId string, pId string, post *models.DeletePost) error
+	Like(ctx context.Context, uId string, pId string, post *models.LikePost) (config.LikeStatus, error)
 	GetLikeStatus(ctx context.Context, uId string, pId string) (config.LikeStatus, error)
+	SendOtp(ctx context.Context, email string) error
+	PasswordReset(ctx context.Context, resetUser models.ResetPasswordUser) error
 	AddQuestion(ctx context.Context, ques *models.RequestQuestion) error
 	DeleteQuestion(ctx context.Context, pId string, qId string, uId string) error
 	GetQuestionByPId(ctx context.Context, pId string) ([]*models.Question, error)

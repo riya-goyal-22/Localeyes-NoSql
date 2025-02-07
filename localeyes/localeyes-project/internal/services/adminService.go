@@ -22,8 +22,8 @@ func NewAdminService(userRepo interfaces.UserRepository, postRepo interfaces.Pos
 	}
 }
 
-func (s *AdminService) GetAllUsers(ctx context.Context) ([]*models.ResponseUser, error) {
-	users, err := s.UserRepo.GetAllUsers(ctx)
+func (s *AdminService) GetAllUsers(ctx context.Context, params models.GetUsersParams) ([]*models.ResponseUser, error) {
+	users, err := s.UserRepo.GetAllUsers(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *AdminService) GetAllUsers(ctx context.Context) ([]*models.ResponseUser,
 }
 
 func (s *AdminService) ReactivateUser(ctx context.Context, uId string) error {
-	user, err := s.UserRepo.FetchUserById(ctx, uId)
+	user, err := s.UserRepo.FetchUserById(ctx, uId, false)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (s *AdminService) DeleteUser(ctx context.Context, user *models.DeleteUser) 
 	return nil
 }
 
-func (s *AdminService) DeletePost(ctx context.Context, uId, pId string, post *models.DeleteOrLikePost) error {
+func (s *AdminService) DeletePost(ctx context.Context, uId, pId string, post *models.DeletePost) error {
 	err := s.PostRepo.DeletePost(ctx, post.Type, post.CreatedAt, uId, pId)
 	if err != nil {
 		return err
